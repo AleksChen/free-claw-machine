@@ -21,10 +21,13 @@ export class GameController {
     this.exitPos = { x: -3.5, z: 3.5 }; // Top-left output hole
     this.controlMode = 'XY'; // XY or DOWN
     this.isGrabbing = false;
+    
+    this.moveSpeed = 9.0; // Units per second
   }
 
   spawnPrizes(count) {
-    const colors = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff];
+    // Neon colors for prizes
+    const colors = [0xff0055, 0x00fff2, 0x9d00ff, 0xffff00, 0xffffff];
     for (let i = 0; i < count; i++) {
         const x = (Math.random() - 0.5) * 8;
         const z = (Math.random() - 0.5) * 8;
@@ -45,7 +48,7 @@ export class GameController {
     this.prizes.push({ model: prizeObj.model, body: body });
   }
 
-  update(gestures, clawPos) {
+  update(dt, gestures = {}, clawPos = {x: 0, z: 0}) {
     // Mapping following user requirements (Mirror aware):
     // Physical Right Hand (MediaPipe 'Left') -> GRAB / BUTTON
     // Physical Left Hand (MediaPipe 'Right') -> MOVEMENT / JOYSTICK
@@ -62,6 +65,8 @@ export class GameController {
 
       // Use palm direction for joystick tilt
       if (physicalLeft && physicalLeft.direction) {
+          this.state.setStatus('MOVING'); // Switch to moving state if detecting input
+          
           // Map direction to tilt. Camera is mirrored.
           // physicalLeft.direction.x: positive is right in camera
           // physicalLeft.direction.y: negative is up in camera
@@ -77,9 +82,9 @@ export class GameController {
           if (Math.abs(tiltX) < 0.25) tiltX = 0;
           if (Math.abs(tiltZ) < 0.25) tiltZ = 0;
 
-          const speedFactor = 0.15;
-          this.clawTargetX += tiltX * speedFactor;
-          this.clawTargetZ += tiltZ * speedFactor;
+          // Apply speed * dt
+          this.clawTargetX += tiltX * this.moveSpeed * dt;
+          this.clawTargetZ += tiltZ * this.moveSpeed * dt;
 
           // Determine action string for UI
           if (Math.abs(tiltX) > Math.abs(tiltZ)) {
@@ -95,6 +100,8 @@ export class GameController {
               this.machine.updateJoystick(tiltX, tiltZ);
               this.machine.updateShadowIndicator(this.clawTargetX, this.clawTargetZ);
           }
+      } else {
+           if (this.state.status === 'MOVING') this.state.setStatus('READY');
       }
 
       // Bound checks (machine area is roughly -5 to 5)
@@ -102,10 +109,10 @@ export class GameController {
       this.clawTargetX = Math.max(-limit, Math.min(limit, this.clawTargetX));
       this.clawTargetZ = Math.max(-limit, Math.min(limit, this.clawTargetZ));
       
-      this.clawPhysics.update(this.clawTargetX, this.clawY, this.clawTargetZ);
+      this.clawPhysics.update(dt, this.clawTargetX, this.clawY, this.clawTargetZ);
       
       // 2. Trigger grab if physical right hand makes a fist (Button press)
-      const isFist = physicalRight.gesture === GESTURE.FIST;
+      const isFist = physicalRight && physicalRight.gesture === GESTURE.FIST;
       
       if (this.machine) {
           this.machine.setButtonPressed(isFist);
@@ -125,35 +132,35 @@ export class GameController {
         }
     }
 
-    // Update Action Display (assuming controller has access to ui via some bridge or event, 
-    // but here we might need to emit or the app class handles it)
-    // Actually, App class calls controller.update, so we can return the action or use a callback.
-    // For now, let's assume we want to update it here if possible or return it.
-    // Looking at App.js, it doesn't seem to do anything with return value.
-    // Let's add this.state.setCurrentAction if it exists, or update UIManager directly if we had a ref.
-    // The GameState seems to be a good place.
     if (this.state.setCurrentAction) {
         this.state.setCurrentAction(currentAction);
     }
 
     // Handle game state transitions
-    this.handleSequences();
+    this.handleSequences(dt);
   }
 
   async startGrabSequence() {
     this.state.setStatus('DESCENDING');
   }
 
-  handleSequences() {
+  handleSequences(dt) {
+    const moveSpeed = this.moveSpeed * dt;
+    const verticalSpeed = 8.0 * dt;
+
     if (this.state.status === 'DESCENDING') {
       this.clawPhysics.claw.open(); // Keep open while descending
-      this.clawY -= 0.15;
-      if (this.clawY <= 2) { // Hit bottom
+      
+      this.clawY -= verticalSpeed;
+      if (this.clawY <= 2.5) { // Hit bottom (slightly higher to avoid clipping floor)
+        this.clawY = 2.5;
         this.state.setStatus('GRABBING');
       }
-      this.clawPhysics.update(this.clawTargetX, this.clawY, this.clawTargetZ);
+      this.clawPhysics.update(dt, this.clawTargetX, this.clawY, this.clawTargetZ);
+      
     } else if (this.state.status === 'GRABBING') {
       this.clawPhysics.claw.close(); // Close to grab
+      
       // Pause for a moment, then ascend
       if (!this._grabTimer) {
         this._grabTimer = setTimeout(() => {
@@ -162,43 +169,55 @@ export class GameController {
           this._grabTimer = null;
         }, 800);
       }
+      // Still update animation
+      this.clawPhysics.update(dt, this.clawTargetX, this.clawY, this.clawTargetZ);
+
     } else if (this.state.status === 'ASCENDING') {
-      this.clawY += 0.15;
+      this.clawY += verticalSpeed;
       if (this.clawY >= 14) {
         this.clawY = 14;
         this.state.setStatus('RETURNING');
       }
-      this.clawPhysics.update(this.clawTargetX, this.clawY, this.clawTargetZ);
+      this.clawPhysics.update(dt, this.clawTargetX, this.clawY, this.clawTargetZ);
+      
     } else if (this.state.status === 'RETURNING') {
       // Move to Exit position automatically
       const dx = this.exitPos.x - this.clawTargetX;
       const dz = this.exitPos.z - this.clawTargetZ;
       const dist = Math.sqrt(dx*dx + dz*dz);
       
-      const moveSpeed = 0.15;
+      // Use logic speed for XZ movement
+      const returnSpeed = moveSpeed * 1.5; // Faster return
+      
       if (dist > 0.1) {
-          this.clawTargetX += (dx / dist) * moveSpeed;
-          this.clawTargetZ += (dz / dist) * moveSpeed;
+          this.clawTargetX += (dx / dist) * returnSpeed;
+          this.clawTargetZ += (dz / dist) * returnSpeed;
       } else {
           this.clawTargetX = this.exitPos.x;
           this.clawTargetZ = this.exitPos.z;
           this.state.setStatus('RELEASING');
       }
-      this.clawPhysics.update(this.clawTargetX, this.clawY, this.clawTargetZ);
+      this.clawPhysics.update(dt, this.clawTargetX, this.clawY, this.clawTargetZ);
+      
     } else if (this.state.status === 'RELEASING') {
       this.clawPhysics.claw.open(); // Open to release
-      this.clawPhysics.release();
       
-      // Score check
+      // Check for win BEFORE release (to verify we brought it here)
       if (this.clawPhysics.caughtPrize) {
-          this.state.addScore(100);
+          // Double check position? Nah, if we are in RELEASING state and have a prize, we won.
+          this.state.triggerWin(100);
       }
       
+      this.clawPhysics.release();
+      
+      // Keep updating physics/animation
+      this.clawPhysics.update(dt, this.clawTargetX, this.clawY, this.clawTargetZ);
+
       if (!this._releaseTimer) {
         this._releaseTimer = setTimeout(() => {
             this.state.setStatus('READY');
             this._releaseTimer = null;
-        }, 1000);
+        }, 1500);
       }
     }
   }

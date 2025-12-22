@@ -7,7 +7,7 @@ export class GameState {
     this.status = 'READY'; // READY, MOVING, DESCENDING, GRABBING, ASCENDING, RELEASING
     this.onScoreChange = null;
     this.onStatusChange = null;
-    this.onActionChange = null;
+    this.onWin = null;
   }
 
   setScore(score) {
@@ -17,6 +17,11 @@ export class GameState {
 
   addScore(points) {
     this.setScore(this.score + points);
+  }
+  
+  triggerWin(points) {
+      this.addScore(points);
+      if (this.onWin) this.onWin(points);
   }
 
   setStatus(status) {

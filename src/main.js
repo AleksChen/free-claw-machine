@@ -28,6 +28,9 @@ class App {
     
     this.lastTime = performance.now();
     this.frameCount = 0;
+    
+    this.latestGestureData = {};
+    this.latestMappedPos = { x: 0, z: 0 };
   }
 
   async init() {
@@ -64,6 +67,7 @@ class App {
       this.gameState.onScoreChange = (score) => this.ui.updateScore(score);
       this.gameState.onStatusChange = (status) => this.ui.setGameState(status);
       this.gameState.onActionChange = (action) => this.ui.setAction(action);
+      this.gameState.onWin = (points) => this.ui.showWin(points);
 
       // Camera & AI initialization
       this.ui.setLoadingStatus('正在启动摄像头...');
@@ -120,18 +124,18 @@ class App {
     this.ui.updateHandIndicators(results.multiHandedness || []);
     this.ui.drawHandMarkers(results);
     
-    const gestureData = this.gestureRecognizer.process(
+    // Process gestures but don't run game logic yet
+    this.latestGestureData = this.gestureRecognizer.process(
         results.multiHandLandmarks, 
         results.multiHandedness
     );
     
     // Mirror aware mapping:
     // Physical Left hand (detected as 'Right' by MediaPipe) controls movement
-    const physicalLeftPos = gestureData.Right.position;
-    const mappedPos = this.coordMapper.mapToClaw(physicalLeftPos);
-    
-    // Update game controller with all hand data
-    this.controller.update(gestureData, mappedPos);
+    if (this.latestGestureData.Right) {
+        const physicalLeftPos = this.latestGestureData.Right.position;
+        this.latestMappedPos = this.coordMapper.mapToClaw(physicalLeftPos);
+    }
   }
 
   startLoop() {
@@ -139,14 +143,23 @@ class App {
       const dt = (time - this.lastTime) / 1000;
       this.lastTime = time;
 
-      // Update AI
+      // Update AI (async)
       await this.handTracker.send(this.videoElement);
       
+      // Update Game Logic (Synced with Frame Rate)
+      if (this.controller) {
+          this.controller.update(dt, this.latestGestureData, this.latestMappedPos);
+      }
+
       // Update Physics
-      this.physics.step(Math.min(dt, 0.1));
+      if (this.physics) {
+          this.physics.step(Math.min(dt, 0.1));
+      }
       
       // Update Scene
-      this.scene.render();
+      if (this.scene) {
+          this.scene.render();
+      }
       
       this.updateFPS();
       requestAnimationFrame(loop);

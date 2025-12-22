@@ -22,6 +22,7 @@
 
       <!-- 主游戏区域 -->
       <div class="game-container">
+        <div class="scanlines"></div>
         <!-- 3D 渲染画布 -->
         <canvas id="game-canvas"></canvas>
 
@@ -93,7 +94,14 @@
           <p id="error-message"></p>
           <button onclick="location.reload()">重新加载</button>
         </div>
+        <div id="win-overlay" class="loading-overlay" style="display: none; background: rgba(0,0,0,0.85);">
+        <div class="loading-content">
+          <h1 style="font-family: 'Orbitron'; color: #ffd700; font-size: 4rem; text-shadow: 0 0 20px #ffd700; margin-bottom: 20px;">WINNER!</h1>
+          <p style="color: #fff; font-size: 1.5rem;">恭喜! 你抓到了奖品!</p>
+          <p id="win-score" style="color: #00fff2; font-size: 2rem; margin: 20px 0;">+100 分</p>
+        </div>
       </div>
+    </div>
     </div>
 
     <script type="module" src="/src/main.js"></script>
