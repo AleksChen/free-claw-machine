@@ -58,46 +58,47 @@ export class GameController {
 
     let currentAction = 'IDLE';
 
-    // 1. Directional Movement via Palm Orientation (Physical Left hand)
+    // 1. Directional Movement via Hand Position (Virtual Joystick)
+    // Using Position is more intuitive than Tilt for "Forward/Backward"
     if (this.state.status === 'READY' || this.state.status === 'MOVING') {
       // Ensure claw is open when ready
       this.clawPhysics.claw.open();
 
-      // Use palm direction for joystick tilt
-      if (physicalLeft && physicalLeft.direction) {
-          this.state.setStatus('MOVING'); // Switch to moving state if detecting input
+      // Check if hands are present
+      if (physicalLeft) {
+          this.state.setStatus('MOVING'); 
           
-          // Map direction to tilt. Camera is mirrored.
-          // physicalLeft.direction.x: positive is right in camera
-          // physicalLeft.direction.y: negative is up in camera
+          // clawPos comes from CoordinateMapper, centering at 0,0
+          // Range is approx -6 to 6.
+          // We treat this position as the Stick deflection.
           
-          // Fix mirroring: negate X
-          let tiltX = -physicalLeft.direction.x * 2.0; 
+          let joyX = clawPos.x / 3.0; // Sensitivity divisor
+          let joyZ = clawPos.y / 3.0; 
           
-          // Fix front/back bias: adjust neutral point. 
-          // Neutral hand is roughly pointing slightly forward (y ~ -0.7)
-          let tiltZ = (physicalLeft.direction.y + 0.7) * 2.0; 
-          
+          // Clamp
+          joyX = Math.max(-1, Math.min(1, joyX));
+          joyZ = Math.max(-1, Math.min(1, joyZ));
+
           // Deadzone
-          if (Math.abs(tiltX) < 0.25) tiltX = 0;
-          if (Math.abs(tiltZ) < 0.25) tiltZ = 0;
+          if (Math.abs(joyX) < 0.15) joyX = 0;
+          if (Math.abs(joyZ) < 0.15) joyZ = 0;
 
           // Apply speed * dt
-          this.clawTargetX += tiltX * this.moveSpeed * dt;
-          this.clawTargetZ += tiltZ * this.moveSpeed * dt;
+          this.clawTargetX += joyX * this.moveSpeed * dt;
+          this.clawTargetZ += joyZ * this.moveSpeed * dt;
 
           // Determine action string for UI
-          if (Math.abs(tiltX) > Math.abs(tiltZ)) {
-              if (tiltX > 0.3) currentAction = 'RIGHT';
-              else if (tiltX < -0.3) currentAction = 'LEFT';
+          if (Math.abs(joyX) > Math.abs(joyZ)) {
+              if (joyX > 0.1) currentAction = 'RIGHT';
+              else if (joyX < -0.1) currentAction = 'LEFT';
           } else {
-              if (tiltZ > 0.3) currentAction = 'BACKWARD';
-              else if (tiltZ < -0.3) currentAction = 'FORWARD';
+              if (joyZ > 0.1) currentAction = 'BACKWARD'; // Positive Z is "Towards Camera" / Backward
+              else if (joyZ < -0.1) currentAction = 'FORWARD';
           }
 
           // Update Visuals
           if (this.machine) {
-              this.machine.updateJoystick(tiltX, tiltZ);
+              this.machine.updateJoystick(joyX, joyZ);
               this.machine.updateShadowIndicator(this.clawTargetX, this.clawTargetZ);
           }
       } else {
